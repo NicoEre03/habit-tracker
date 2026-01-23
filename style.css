@@ -1,0 +1,401 @@
+:root {
+    --bg-color: #121212;
+    --surface-color: #1e1e1e;
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0a0;
+    --border-color: #333;
+
+    --status-0-bg: #2c2c2c;
+    --status-1-bg: #6ba86f;
+    /* Green - Done */
+    --status-1-fg: #a5d6a7;
+    --status-2-bg: #d6c809;
+    /* Gold/Amber - Well Done */
+    --status-2-fg: #259c6b;
+    --status-3-bg: #144185;
+    /* Red - Failed */
+    --status-3-fg: #1e5ba0;
+
+    --cell-width: 40px;
+    --cell-height: 40px;
+    --header-col-width: 120px;
+    --header-row-height: 50px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Roboto', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    overflow: hidden;
+    /* App container handles scrolling */
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+#app-container {
+    flex: 1;
+    overflow: auto;
+    /* Enable native scrolling */
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.habit-grid {
+    display: grid;
+    /* Grid template columns will be set by JS dynamically based on date range */
+    /* Example: 200px repeat(30, 60px) */
+}
+
+/* --- Cells --- */
+.cell {
+    border-right: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    user-select: none;
+    background-color: var(--bg-color);
+    width: var(--cell-width);
+    height: var(--cell-height);
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+    position: relative;
+    /* Anchor for absolute positioned elements (like note indicator) */
+}
+
+.cell:hover {
+    border-color: #555;
+    z-index: 1;
+    /* Bring hover border to top */
+}
+
+/* Note Indicator */
+.cell.has-note::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 0;
+    height: 0;
+    border-top: 8px solid var(--text-primary);
+    border-left: 8px solid transparent;
+}
+
+/* --- Headers --- */
+.header-col {
+    position: sticky;
+    left: 0;
+    width: var(--header-col-width);
+    background-color: var(--surface-color);
+    z-index: 10;
+    justify-content: flex-start;
+    padding-left: 1rem;
+    font-weight: bold;
+    border-right: 2px solid var(--border-color);
+}
+
+.header-row {
+    position: sticky;
+    top: 0;
+    height: var(--header-row-height);
+    background-color: var(--surface-color);
+    z-index: 10;
+    flex-direction: column;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border-bottom: 2px solid var(--border-color);
+}
+
+.header-corner {
+    position: sticky;
+    top: 0;
+    left: 0;
+    width: var(--header-col-width);
+    height: var(--header-row-height);
+    background-color: var(--surface-color);
+    z-index: 20;
+    /* Highest priority */
+    border-right: 2px solid var(--border-color);
+    border-bottom: 2px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+/* --- Status States --- */
+.status-0 {
+    background-color: var(--status-0-bg);
+}
+
+.status-1 {
+    background-color: var(--status-1-bg);
+    color: var(--status-1-fg);
+}
+
+
+
+.status-2 {
+    background-color: var(--status-2-bg);
+    color: var(--status-2-fg);
+}
+
+
+
+.status--1 {
+    background-color: var(--status-3-bg);
+    color: var(--status-3-fg);
+    cursor: default;
+    /* Failed state shouldn't satisfy the click interaction naturally, but handled in JS */
+}
+
+
+
+/* --- Utility --- */
+.today-col {
+    background-color: #2a2a2a;
+    /* Slightly lighter highlight for the header */
+    border-bottom: 2px solid #fff;
+}
+
+/* --- Floating Action Button --- */
+.fab {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    background-color: var(--status-2-bg);
+    color: var(--bg-color);
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s;
+    z-index: 100;
+}
+
+.fab:hover {
+    transform: scale(1.1);
+}
+
+.fab:active {
+    transform: scale(0.95);
+}
+
+/* --- Mode Toggle --- */
+.mode-toggle {
+    position: fixed;
+    top: 10px;
+    right: 20px;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 5px 10px;
+    border-radius: 20px;
+}
+
+.mode-toggle input {
+    display: none;
+}
+
+.mode-toggle .slider {
+    position: relative;
+    width: 40px;
+    height: 20px;
+    background-color: #555;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: .4s;
+    display: inline-block;
+}
+
+.mode-toggle .slider:before {
+    content: "";
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    border-radius: 50%;
+    transition: .4s;
+}
+
+.mode-toggle input:checked+.slider {
+    background-color: var(--status-1-bg);
+}
+
+.mode-toggle input:checked+.slider:before {
+    transform: translateX(20px);
+}
+
+.mode-toggle .label-text {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* Dragging Styles */
+.header-col.draggable {
+    cursor: grab;
+}
+
+.header-col.dragging {
+    opacity: 0.5;
+    background-color: #333;
+}
+
+.header-col.drag-over {
+    border-top: 2px solid var(--status-2-bg);
+}
+
+/* --- Modal --- */
+.hidden {
+    display: none !important;
+}
+
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background-color: var(--surface-color);
+    padding: 20px;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+    border: 1px solid var(--border-color);
+}
+
+.modal-content h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+
+#note-input {
+    width: 100%;
+    height: 100px;
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 10px;
+    margin: 10px 0;
+    font-family: inherit;
+    resize: vertical;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.spacer {
+    flex: 1;
+}
+
+.text-secondary {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin-bottom: 10px;
+}
+
+/* Buttons */
+button {
+    cursor: pointer;
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: none;
+    font-family: inherit;
+    font-weight: bold;
+}
+
+.btn-primary {
+    background-color: var(--status-1-bg);
+    color: white;
+}
+
+.btn-secondary {
+    background-color: #333;
+    color: white;
+}
+
+.btn-danger {
+    background-color: var(--status-3-bg);
+    color: white;
+}
+
+.btn-primary:hover,
+.btn-secondary:hover,
+.btn-danger:hover {
+    opacity: 0.9;
+}
+
+/* --- Loading Overlay --- */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(18, 18, 18, 0.8);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+    color: var(--text-primary);
+    font-size: 1.2rem;
+    transition: opacity 0.3s;
+}
+
+.loading-overlay.fade-out {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #333;
+    border-top: 4px solid var(--status-1-bg);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}

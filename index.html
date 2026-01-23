@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habit Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div id="app-container">
+        <div id="loading-overlay" class="loading-overlay">
+            <div class="spinner"></div>
+            <p>Syncing...</p>
+        </div>
+        <label class="mode-toggle">
+            <input type="checkbox" id="editor-mode-toggle">
+            <span class="slider"></span>
+            <span class="label-text">Editor Mode</span>
+        </label>
+        <!-- Grid will be injected here by JS -->
+        <div id="habit-grid" class="habit-grid"></div>
+        <button id="add-habit-btn" class="fab" title="Add Habit">+</button>
+
+        <!-- Note Modal -->
+        <div id="note-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>Habit Note</h3>
+                <p id="note-meta" class="text-secondary"></p>
+                <textarea id="note-input" placeholder="Add a note..."></textarea>
+                <div class="modal-actions">
+                    <button id="note-delete-btn" class="btn-danger">Delete</button>
+                    <div class="spacer"></div>
+                    <button id="note-cancel-btn" class="btn-secondary">Cancel</button>
+                    <button id="note-save-btn" class="btn-primary">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>
