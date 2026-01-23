@@ -132,6 +132,11 @@ class HabitTracker {
         this.btnSave.addEventListener('click', () => this.saveNote());
         this.btnDelete.addEventListener('click', () => this.deleteNote());
 
+        // Setup Resize Listener (Center Alignment)
+        window.addEventListener('resize', () => {
+            this.scrollToToday();
+        });
+
         await this.loadData();
     }
 
@@ -174,10 +179,7 @@ class HabitTracker {
     render() {
         this.gridContainer.innerHTML = '';
 
-        // VIEWPORT LOGIC: Render only +/- 15 days around today (or selection)
-        // Filter this.state.dates -> filteredDates indices
-
-        // Use Local Time for Today
+        // VIEWPORT LOGIC: Render window around today or selection
         const now = new Date();
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -187,77 +189,119 @@ class HabitTracker {
         // Find index of today
         const todayIndex = this.state.dates.findIndex(d => d === todayStr);
 
+        // Define Window
+        if (!this.state.windowForward) this.state.windowForward = 15;
+        if (!this.state.windowBack) this.state.windowBack = 7;
+
         let startIdx = 0;
         let endIdx = this.state.dates.length;
 
         if (todayIndex !== -1) {
-            // Render 15 days back and 15 days forward (Window = 30)
-            startIdx = Math.max(0, todayIndex - 15);
-            endIdx = Math.min(this.state.dates.length, todayIndex + 16);
+            startIdx = Math.max(0, todayIndex - this.state.windowBack);
+            endIdx = Math.min(this.state.dates.length, todayIndex + this.state.windowForward + 1);
         }
 
         // Subset
         const renderDates = this.state.dates.slice(startIdx, endIdx);
 
-        // 1. Setup CSS Grid Template
-        // First col: 180px (matches header-col-width), Rest: 40px (matches cell-width)
-        const colTemplate = `180px repeat(${renderDates.length}, 40px)`;
+        // --- 1. Calculate Month Spans ---
+        const monthSpans = [];
+        let currentMonth = null;
+        let currentSpan = 0;
+
+        renderDates.forEach((dateStr, index) => {
+            const [y, m, d] = dateStr.split('-').map(Number);
+            const dObj = new Date(y, m - 1, d);
+            const mStr = dObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+            if (mStr !== currentMonth) {
+                if (currentMonth) {
+                    monthSpans.push({ name: currentMonth, span: currentSpan });
+                }
+                currentMonth = mStr;
+                currentSpan = 1;
+            } else {
+                currentSpan++;
+            }
+        });
+        if (currentMonth) {
+            monthSpans.push({ name: currentMonth, span: currentSpan });
+        }
+
+        // --- 2. Setup CSS Grid Template ---
+        // Template: [Habit 120px] [Prev 30px] [Dates...] [Next 30px]
+        const colTemplate = `120px 30px repeat(${renderDates.length}, 44px) 30px`;
         this.gridContainer.style.gridTemplateColumns = colTemplate;
+        this.gridContainer.style.gap = "0px";
 
-        // 2. Render Header Row
-        // Top-Left Corner
-        const corner = document.createElement('div');
-        corner.className = 'header-corner';
-        corner.textContent = 'Habits';
-        this.gridContainer.appendChild(corner);
+        // --- 3. Render Header Rows ---
 
+        // Row 1: Month Header
+        const cornerMonth = document.createElement('div');
+        cornerMonth.className = 'header-corner-month';
+        this.gridContainer.appendChild(cornerMonth);
+
+        // 1.2 Prev Spacer (Upper Layout)
+        const prevSpacerM = document.createElement('div');
+        this.gridContainer.appendChild(prevSpacerM);
+
+        // 1.3 Month Cells
+        monthSpans.forEach(span => {
+            const mDiv = document.createElement('div');
+            mDiv.className = 'cell header-month';
+            mDiv.textContent = span.name;
+            mDiv.style.gridColumn = `span ${span.span}`;
+            this.gridContainer.appendChild(mDiv);
+        });
+
+        // 1.4 Next Spacer
+        const nextSpacerM = document.createElement('div');
+        this.gridContainer.appendChild(nextSpacerM);
+
+        // Row 2: Date Header
+        const cornerDate = document.createElement('div');
+        cornerDate.className = 'header-corner-date';
+        cornerDate.textContent = 'Habits';
+        this.gridContainer.appendChild(cornerDate);
+
+        // 2.2 Prev Spacer
+        const prevSpacerD = document.createElement('div');
+        this.gridContainer.appendChild(prevSpacerD);
+
+        // 2.3 Date Cells
         renderDates.forEach(dateStr => {
             const dateDiv = document.createElement('div');
-            dateDiv.className = 'cell header-row'; // Shared cell styles + header specific
+            dateDiv.className = 'cell header-date';
 
-            // Format Date: "Mon\nJan 01"
-            // Format Date: "Mon\nJan 01"
-            // We assume dateStr is YYYY-MM-DD. 
-            // We want to construct it as Local Date [Y, M-1, D] to avoid UTC offsets.
-            // Split: "2026-01-22" -> [2026, 01, 22]
             const [y, m, d] = dateStr.split('-').map(Number);
-            const dObj = new Date(y, m - 1, d); // Local Time 00:00:00
+            const dObj = new Date(y, m - 1, d);
+            const dayName = dObj.toLocaleDateString('en-US', { weekday: 'short' });
+            const dayNum = dObj.getDate();
 
-            if (isNaN(dObj.getTime())) {
-                dObj = new Date(dateStr); // Fallback to parsing string directly
-            }
-            if (isNaN(dObj.getTime())) {
-                // Fallback display
-                dateDiv.innerHTML = `<span>${dateStr}</span>`;
-            } else {
-                const dayName = dObj.toLocaleDateString('en-US', { weekday: 'short' });
-                const dayNum = dObj.getDate();
-                const month = dObj.toLocaleDateString('en-US', { month: 'short' });
-
-                dateDiv.innerHTML = `<span style="font-size:0.8em">${month}</span><span>${dayName}</span><span style="font-size:1.1em; font-weight:bold">${dayNum}</span>`;
-            }
+            dateDiv.innerHTML = `<span style="font-size:0.8em">${dayName}</span><span style="font-size:1.1em; font-weight:bold">${dayNum}</span>`;
 
             if (dateStr === todayStr) {
                 dateDiv.classList.add('today-col');
-                dateDiv.id = 'header-today'; // Anchor for scrolling
+                dateDiv.id = 'header-today';
             }
 
             this.gridContainer.appendChild(dateDiv);
         });
 
-        // 3. Render Rows
+        // 2.4 Next Spacer
+        const nextSpacerD = document.createElement('div');
+        this.gridContainer.appendChild(nextSpacerD);
+
+        // --- 4. Render Data Rows ---
         this.state.data.forEach((habit, rowIndex) => {
-            // Row Header (Habit Name)
             const rowHeader = document.createElement('div');
             rowHeader.className = 'cell header-col';
             rowHeader.textContent = habit.name;
 
-            // Editor Mode Logic: DnD
+            // Editor Mode Logic
             if (this.isEditorMode) {
                 rowHeader.classList.add('draggable');
                 rowHeader.draggable = true;
-
-                // DnD Events
                 rowHeader.addEventListener('dragstart', (e) => this.handleDragStart(e, rowIndex));
                 rowHeader.addEventListener('dragenter', (e) => e.preventDefault());
                 rowHeader.addEventListener('dragover', (e) => this.handleDragOver(e, rowIndex, rowHeader));
@@ -265,52 +309,50 @@ class HabitTracker {
                 rowHeader.addEventListener('drop', (e) => this.handleDrop(e, rowIndex));
             }
 
-            // Editor Mode Logic: Rename / Delete
             rowHeader.addEventListener('dblclick', () => {
-                if (!this.isEditorMode) return; // Guard
+                if (!this.isEditorMode) return;
                 const newName = prompt("Rename habit:", habit.name);
                 if (newName) {
-                    // Optimistic
-                    const oldName = habit.name;
-                    rowHeader.textContent = newName;
                     habit.name = newName;
+                    rowHeader.textContent = newName;
                     this.api.renameHabit(rowIndex, newName);
                 }
             });
 
             rowHeader.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                if (!this.isEditorMode) return; // Guard
+                if (!this.isEditorMode) return;
                 if (confirm(`Delete habit "${habit.name}"?`)) {
                     this.deleteHabit(rowIndex);
                 }
             });
+
             this.gridContainer.appendChild(rowHeader);
 
+            // Prev Button
+            const prevCell = document.createElement('div');
+            prevCell.className = 'load-more-container'; // Generic class
+            prevCell.innerHTML = '<span class="load-more-arrow">‹</span>';
+            prevCell.title = "Load previous days";
+            prevCell.addEventListener('click', () => this.loadMorePast());
+            this.gridContainer.appendChild(prevCell);
+
             // Data Cells (Filtered Window)
-            // habit.cells corresponds to this.state.dates indices
-            // We need to slice it same as dates
             const renderCells = habit.cells.slice(startIdx, endIdx);
 
             renderCells.forEach((cellData, viewIndex) => {
-                // IMPORTANT: Calculate original Column Index for data operations
                 const originalColIndex = startIdx + viewIndex;
                 const cell = document.createElement('div');
                 cell.className = `cell status-${cellData.val}`;
                 cell.dataset.row = rowIndex;
                 cell.dataset.col = originalColIndex;
-                cell.dataset.date = this.state.dates[originalColIndex]; // Meta data
 
-                // Visual Indicator for Note
                 if (cellData.note) {
                     cell.classList.add('has-note');
-                    cell.title = cellData.note; // Native tooltip
+                    cell.title = cellData.note;
                 }
 
-                // Click Handler (Toggle Status)
                 cell.addEventListener('click', () => this.handleCellClick(cell, habit, originalColIndex));
-
-                // Context Menu (Edit Note)
                 cell.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
                     this.handleCellContextMenu(cell, habit, originalColIndex);
@@ -318,7 +360,27 @@ class HabitTracker {
 
                 this.gridContainer.appendChild(cell);
             });
+
+            // Next Button
+            const nextCell = document.createElement('div');
+            nextCell.className = 'load-more-container';
+            nextCell.innerHTML = '<span class="load-more-arrow">›</span>';
+            nextCell.title = "Load more days";
+            nextCell.addEventListener('click', () => this.loadMoreFuture());
+            this.gridContainer.appendChild(nextCell);
         });
+    }
+
+    loadMorePast() {
+        if (!this.state.windowBack) this.state.windowBack = 7;
+        this.state.windowBack += 7;
+        this.render();
+    }
+
+    loadMoreFuture() {
+        if (!this.state.windowForward) this.state.windowForward = 15;
+        this.state.windowForward += 7;
+        this.render();
     }
 
     handleCellClick(cellElement, habitObj, colIndex) {

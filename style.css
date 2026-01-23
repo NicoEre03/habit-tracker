@@ -6,20 +6,23 @@
     --border-color: #333;
 
     --status-0-bg: #2c2c2c;
-    --status-1-bg: #6ba86f;
+    --status-1-bg: #3bc2a0;
     /* Green - Done */
-    --status-1-fg: #a5d6a7;
-    --status-2-bg: #d6c809;
+    --status-1-fg: #3bc2a0;
+    --status-2-bg: #20d155;
     /* Gold/Amber - Well Done */
     --status-2-fg: #259c6b;
-    --status-3-bg: #144185;
+    --status-3-bg: #e93841d2;
     /* Red - Failed */
-    --status-3-fg: #1e5ba0;
+    --status-3-fg: #531619;
 
     --cell-width: 40px;
     --cell-height: 40px;
     --header-col-width: 120px;
-    --header-row-height: 50px;
+    --header-date-height: 50px;
+    /* Renamed from header-row-height */
+    --header-month-height: 30px;
+    /* New */
 }
 
 * {
@@ -52,12 +55,16 @@ body {
     display: grid;
     /* Grid template columns will be set by JS dynamically based on date range */
     /* Example: 200px repeat(30, 60px) */
+    /* Ensure rows are sized correctly if needed, but auto works usually */
 }
 
 /* --- Cells --- */
 .cell {
-    border-right: 1px solid var(--border-color);
-    border-bottom: 1px solid var(--border-color);
+    /* removed border-right/bottom to rely on gap or individual cell styling for cleaner look with rounded corners */
+    /* But simpler to keep borders or use gap. Let's try margin/gap approach for "merged" feel or keep borders? */
+    /* User asked for rounded cells. Borders on rounded cells look weird if they touch. */
+    /* Let's use gap in grid and background colors for cells */
+
     display: flex;
     align-items: center;
     justify-content: center;
@@ -67,27 +74,33 @@ body {
     width: var(--cell-width);
     height: var(--cell-height);
     cursor: pointer;
-    transition: background-color 0.1s ease;
+    transition: background-color 0.1s ease, transform 0.1s;
     position: relative;
-    /* Anchor for absolute positioned elements (like note indicator) */
+
+    border-radius: 6px;
+    /* User Request */
+    margin: 2px;
+    /* Add spacing so rounded corners are visible */
 }
 
 .cell:hover {
-    border-color: #555;
-    z-index: 1;
-    /* Bring hover border to top */
+    border: 1px solid #777;
+    transform: scale(1.05);
+    /* Slight pop */
+    z-index: 5;
 }
 
 /* Note Indicator */
 .cell.has-note::before {
     content: "";
     position: absolute;
-    top: 0;
-    right: 0;
-    width: 0;
-    height: 0;
-    border-top: 8px solid var(--text-primary);
-    border-left: 8px solid transparent;
+    top: 2px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
+    background-color: var(--text-primary);
+    border-radius: 50%;
+    border: none;
 }
 
 /* --- Headers --- */
@@ -96,40 +109,76 @@ body {
     left: 0;
     width: var(--header-col-width);
     background-color: var(--surface-color);
-    z-index: 10;
+    z-index: 30;
+    /* Higher than content, lower than top corners */
     justify-content: flex-start;
     padding-left: 1rem;
     font-weight: bold;
-    border-right: 2px solid var(--border-color);
+    border-radius: 6px;
+    margin: 2px;
 }
 
-.header-row {
+/* Month Row (Top) */
+.header-month {
     position: sticky;
     top: 0;
-    height: var(--header-row-height);
+    height: var(--header-month-height);
     background-color: var(--surface-color);
-    z-index: 10;
+    z-index: 40;
+    font-size: 0.9rem;
+    font-weight: bold;
+    color: var(--text-primary);
+    border-radius: 6px;
+    margin: 2px;
+    /* Matches .cell margin for correct visual alignment */
+    /* Spans multiple columns */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+/* Date Row (Below Month) */
+.header-date {
+    position: sticky;
+    top: calc(var(--header-month-height) + 4px);
+    /* Account for margin */
+    height: var(--header-date-height);
+    background-color: var(--surface-color);
+    z-index: 40;
     flex-direction: column;
     font-size: 12px;
     color: var(--text-secondary);
-    border-bottom: 2px solid var(--border-color);
+    border-radius: 6px;
+    margin: 2px;
 }
 
-.header-corner {
+/* Corners */
+.header-corner-month {
     position: sticky;
     top: 0;
     left: 0;
     width: var(--header-col-width);
-    height: var(--header-row-height);
+    height: var(--header-month-height);
     background-color: var(--surface-color);
-    z-index: 20;
-    /* Highest priority */
-    border-right: 2px solid var(--border-color);
-    border-bottom: 2px solid var(--border-color);
+    z-index: 50;
+    /* Top most */
+    margin: 2px;
+}
+
+.header-corner-date {
+    position: sticky;
+    top: calc(var(--header-month-height) + 4px);
+    left: 0;
+    width: var(--header-col-width);
+    height: var(--header-date-height);
+    background-color: var(--surface-color);
+    z-index: 50;
+    /* Top most */
+    margin: 2px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.2rem;
     font-weight: bold;
 }
 
@@ -398,4 +447,26 @@ button {
     100% {
         transform: rotate(360deg);
     }
+}
+
+.load-more-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--surface-color);
+    cursor: pointer;
+    border-radius: 6px;
+    margin: 2px;
+    transition: background-color 0.2s;
+    width: 30px;
+    /* Fixed width for compactness */
+}
+
+.load-more-container:hover {
+    background-color: #333;
+}
+
+.load-more-arrow {
+    font-size: 1.5rem;
+    color: var(--text-secondary);
 }
