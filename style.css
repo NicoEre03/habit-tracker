@@ -15,14 +15,59 @@
     --status-3-bg: #e93841d2;
     /* Red - Failed */
     --status-3-fg: #531619;
+    --status-4-bg: #3f3f3f;
+    /* Orange - Missed */
+    --status-4-fg: #726551;
 
-    --cell-width: 40px;
-    --cell-height: 40px;
-    --header-col-width: 120px;
-    --header-date-height: 50px;
+    --cell-width: 34px;
+    /* Slightly relaxed for text breathing room */
+    --cell-height: 34px;
+    --header-col-width: 160px;
+    /* Kept wide for habits */
+    --header-date-height: 40px;
     /* Renamed from header-row-height */
     --header-month-height: 30px;
-    /* New */
+    --border-radius: 6px;
+    /* New Roundness Var */
+    --periodicity-col-width: 50px;
+}
+
+/* --- Cells --- */
+.cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    user-select: none;
+    background-color: var(--bg-color);
+    width: var(--cell-width);
+    height: var(--cell-height);
+    cursor: pointer;
+    transition: background-color 0.1s ease, transform 0.1s;
+    position: relative;
+    border-radius: var(--border-radius);
+    /* Rounded Cells */
+    margin: 0;
+    /* Handled by TD padding now */
+}
+
+.cell:hover {
+    border: 1px solid #777;
+    transform: scale(1.05);
+    z-index: 5;
+}
+
+/* Note Indicator */
+.cell.has-note::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
+    background-color: var(--text-primary);
+    border-radius: 50%;
+    border: none;
 }
 
 * {
@@ -51,135 +96,286 @@ body {
     height: 100%;
 }
 
+/* --- Table Layout --- */
 .habit-grid {
-    display: grid;
-    /* Grid template columns will be set by JS dynamically based on date range */
-    /* Example: 200px repeat(30, 60px) */
-    /* Ensure rows are sized correctly if needed, but auto works usually */
-}
-
-/* --- Cells --- */
-.cell {
-    /* removed border-right/bottom to rely on gap or individual cell styling for cleaner look with rounded corners */
-    /* But simpler to keep borders or use gap. Let's try margin/gap approach for "merged" feel or keep borders? */
-    /* User asked for rounded cells. Borders on rounded cells look weird if they touch. */
-    /* Let's use gap in grid and background colors for cells */
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    user-select: none;
+    display: table;
+    border-collapse: separate;
+    border-spacing: 0;
+    /* Required for sticky headers to work with borders/backgrounds properly */
+    width: max-content;
+    /* Ensure it takes full width required by content */
     background-color: var(--bg-color);
-    width: var(--cell-width);
-    height: var(--cell-height);
-    cursor: pointer;
-    transition: background-color 0.1s ease, transform 0.1s;
-    position: relative;
-
-    border-radius: 6px;
-    /* User Request */
-    margin: 2px;
-    /* Add spacing so rounded corners are visible */
 }
 
-.cell:hover {
-    border: 1px solid #777;
-    transform: scale(1.05);
-    /* Slight pop */
-    z-index: 5;
-}
+/* --- Headers (TH) --- */
 
-/* Note Indicator */
-.cell.has-note::before {
-    content: "";
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    width: 6px;
-    height: 6px;
-    background-color: var(--text-primary);
-    border-radius: 50%;
-    border: none;
-}
-
-/* --- Headers --- */
-.header-col {
+/* Common Sticky Styles */
+th.sticky-col,
+td.sticky-col {
     position: sticky;
     left: 0;
-    width: var(--header-col-width);
-    background-color: var(--surface-color);
-    z-index: 30;
-    /* Higher than content, lower than top corners */
-    justify-content: flex-start;
-    padding-left: 1rem;
-    font-weight: bold;
-    border-radius: 6px;
-    margin: 2px;
+    z-index: 60;
+    /* Higher than arrows (which will be ~45/50) */
+    background-color: var(--bg-color);
+    /* Void color for split look */
 }
 
-/* Month Row (Top) */
-.header-month {
+th.sticky-row {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background-color: var(--surface-color);
+}
+
+/* Month Header */
+.header-month-row th {
     position: sticky;
     top: 0;
     height: var(--header-month-height);
     background-color: var(--surface-color);
     z-index: 40;
+    color: var(--text-primary);
     font-size: 0.9rem;
     font-weight: bold;
-    color: var(--text-primary);
-    border-radius: 6px;
-    margin: 2px;
-    /* Matches .cell margin for correct visual alignment */
-    /* Spans multiple columns */
-    display: flex;
-    align-items: center;
-    justify-content: center;
     text-align: center;
+    border-bottom: 2px solid var(--bg-color);
+    /* Spacing simulation */
+    border-right: 1px solid var(--bg-color);
+    /* Added separator "cut" */
+    border-radius: var(--border-radius);
+    /* Roundness */
 }
 
-/* Date Row (Below Month) */
-.header-date {
+/* Date Header */
+.header-date-row th {
     position: sticky;
-    top: calc(var(--header-month-height) + 4px);
-    /* Account for margin */
+    top: var(--header-month-height);
     height: var(--header-date-height);
     background-color: var(--surface-color);
     z-index: 40;
-    flex-direction: column;
-    font-size: 12px;
     color: var(--text-secondary);
-    border-radius: 6px;
-    margin: 2px;
+    font-size: 12px;
+    font-weight: normal;
+    border-bottom: 2px solid var(--bg-color);
+    /* Spacing simulation */
+
+    /* Width = Cell 34px + Pad 2px = 36px */
+    width: 36px;
+    min-width: 36px;
+    max-width: 36px;
+    box-sizing: border-box;
+
+    /* Individual Container Look */
+    border-right: 2px solid var(--bg-color);
+    border-radius: var(--border-radius);
+    padding: 0;
+    /* Ensure internal text centered or handled by inner `header-date-cell` */
 }
 
-/* Corners */
-.header-corner-month {
-    position: sticky;
-    top: 0;
+/* Month End Separator */
+/* Month End Separator */
+/* Month End Separator - REMOVED */
+/* .header-date-row th.month-end-border {} */
+
+/* Corners (Intersect of Sticky Row & Col) */
+.header-corner {
+    z-index: 70 !important;
+    /* Highest priority */
     left: 0;
-    width: var(--header-col-width);
-    height: var(--header-month-height);
     background-color: var(--surface-color);
-    z-index: 50;
-    /* Top most */
-    margin: 2px;
+    border-radius: var(--border-radius);
+    /* Roundness */
+}
+
+.header-corner-month {
+    top: 0;
+    height: var(--header-month-height);
 }
 
 .header-corner-date {
-    position: sticky;
-    top: calc(var(--header-month-height) + 4px);
-    left: 0;
-    width: var(--header-col-width);
+    top: var(--header-month-height);
     height: var(--header-date-height);
+    font-weight: bold;
+    /* display: flex; REMOVED to match body table-cell logic */
+    /* align-items: center; REMOVED */
+    /* justify-content: center; REMOVED - Align Left like body */
+    /* justify-content: center; REMOVED - Align Left like body */
+    /* justify-content: flex-start; REMOVED */
+    padding-left: 0;
+    /* REMOVED padding, now in inner */
+    /* Match .header-col padding */
+    vertical-align: middle;
+    /* text-align: center; REMOVED */
+    text-align: left;
+
+    /* Force Width Sync */
+    width: var(--header-col-width);
+    min-width: var(--header-col-width);
+    max-width: var(--header-col-width);
+    box-sizing: border-box;
+
+    border: none;
+    /* Removed border-right, now handled by inner card or gap */
+    background-color: var(--bg-color);
+    /* Void background matches body */
+    padding: 1px 0;
+    /* Matches Body .header-col padding */
+}
+
+/* New Inner Header Card */
+/* New Inner Header Card */
+.header-corner-inner {
     background-color: var(--surface-color);
-    z-index: 50;
-    /* Top most */
-    margin: 2px;
+    border-radius: var(--border-radius);
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    display: flex;
+    align-items: center;
+    /* Vertical Center */
+    justify-content: center;
+    /* Horizontal Center (Fixes "not correctly centered") */
+    height: 100%;
+    width: 100%;
+    white-space: nowrap;
+}
+
+/* ... Arrow Columns ... */
+
+/* Habit Column (Left Sticky) */
+.header-col {
+    /* ... existing ... */
+    width: var(--header-col-width);
+    min-width: var(--header-col-width);
+    max-width: var(--header-col-width);
+    background-color: var(--surface-color);
+    color: var(--text-primary);
+    font-weight: bold;
+    text-align: left;
+    /* padding-left: 1rem; REMOVED/Overridden by inner */
+    border-right: 2px solid var(--bg-color);
+    /* Kept? No, looking at lines 249+ it says border:none */
+    vertical-align: middle;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: visible;
+    padding: 1px 0;
+    border: none;
+    background-color: var(--bg-color);
+}
+
+.period-col {
+    width: var(--periodicity-col-width);
+    min-width: var(--periodicity-col-width);
+    max-width: var(--periodicity-col-width);
+    background-color: var(--surface-color);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    text-align: center;
+    border-right: 2px solid var(--bg-color);
+    vertical-align: middle;
+    padding: 1px 0;
+    border: none;
+    cursor: pointer;
+}
+
+.period-col-inner {
+    background-color: var(--bg-color);
+    border-radius: var(--border-radius);
     display: flex;
     align-items: center;
     justify-content: center;
+    height: 100%;
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.period-col:hover .period-col-inner {
+    border: 1px solid #777;
+}
+
+.habit-name-inner {
+    background-color: var(--surface-color);
+    border-radius: var(--border-radius);
+    padding-left: 0.8rem;
+    padding-right: 1.0rem;
+    /* Increased to 1.0rem to prevent crowding */
+    display: flex;
+    align-items: center;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+    /* Tighter line height to prevent vertical touching */
+}
+
+/* Arrow Columns */
+.arrow-col {
+    background-color: var(--bg-color) !important;
+    /* Black background */
+    z-index: 10;
+}
+
+
+/* Fix flex display on TH breaking table layout usually, better to leave default table-cell or use internal div */
+
+
+/* Habit Column (Left Sticky) */
+.header-col {
+    width: var(--header-col-width);
+    min-width: var(--header-col-width);
+    max-width: var(--header-col-width);
+    background-color: var(--surface-color);
+    color: var(--text-primary);
     font-weight: bold;
+    text-align: left;
+    padding-left: 1rem;
+    border-right: 2px solid var(--bg-color);
+    /* Spacing simulation */
+    vertical-align: middle;
+    /* Typography Refinements */
+    font-size: 0.85rem;
+    /* Reduced size */
+    white-space: nowrap;
+    overflow: visible;
+    /* Allow inner div to handle overflow if needed */
+    padding: 1px 0;
+    /* Reduced to 1px vertical gap, 0 horizontal to maximize width */
+    border: none;
+    background-color: var(--bg-color);
+    /* Matches page background for "gap" look */
+}
+
+.habit-name-inner {
+    background-color: var(--surface-color);
+    border-radius: var(--border-radius);
+    padding-left: 0.8rem;
+    padding-right: 0.5rem;
+    /* Added Right Padding to prevent text touching edge */
+    /* Increased from 0.5rem for better spacing */
+    display: flex;
+    align-items: center;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Table Cells (TD) */
+td {
+    padding: 1px;
+    /* Reduced from 2px for compaction */
+    background-color: var(--bg-color);
+}
+
+/* Revisit Date Cells inner content */
+.header-date-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
 }
 
 /* --- Status States --- */
@@ -206,6 +402,12 @@ body {
     color: var(--status-3-fg);
     cursor: default;
     /* Failed state shouldn't satisfy the click interaction naturally, but handled in JS */
+}
+
+.status--2 {
+    background-color: var(--status-4-bg);
+    color: var(--status-4-fg);
+    cursor: default;
 }
 
 
@@ -301,17 +503,20 @@ body {
 }
 
 /* Dragging Styles */
-.header-col.draggable {
+/* Dragging Styles */
+tr.draggable {
     cursor: grab;
 }
 
-.header-col.dragging {
+tr.dragging {
     opacity: 0.5;
     background-color: #333;
 }
 
-.header-col.drag-over {
+tr.drag-over>* {
+    /* Apply border to cells since TR border is tricky */
     border-top: 2px solid var(--status-2-bg);
+    border-bottom: 2px solid var(--status-2-bg);
 }
 
 /* --- Modal --- */
@@ -453,7 +658,8 @@ button {
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: var(--surface-color);
+    background-color: transparent;
+    /* Changed from surface-color */
     cursor: pointer;
     border-radius: 6px;
     margin: 2px;

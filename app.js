@@ -85,6 +85,16 @@ class GAS_API {
         console.log(`API: Reorder ${fromIndex} -> ${toIndex}`);
         return this._request('reorderHabit', { fromIndex, toIndex });
     }
+
+    async updateHabitPeriodicity(rowIndex, periodicity) {
+        console.log(`API: Update Periodicity ${rowIndex} -> ${periodicity}`);
+        return this._request('updateHabitPeriodicity', { rowIndex, periodicity });
+    }
+
+    async saveSnapshot() {
+        console.log("API: Save Snapshot");
+        return this._request('saveSnapshot', {});
+    }
 }
 
 /**
@@ -122,8 +132,30 @@ class HabitTracker {
 
         // Setup Toggle
         const toggle = document.getElementById('editor-mode-toggle');
+
+        // Inject Snapshot Button
+        const addBtn = document.getElementById('add-habit-btn');
+        this.btnSnapshot = document.createElement('button');
+        this.btnSnapshot.textContent = "Save Config";
+        this.btnSnapshot.className = "add-btn";
+        this.btnSnapshot.style.backgroundColor = "#4caf50";
+        this.btnSnapshot.style.marginLeft = "10px";
+        this.btnSnapshot.style.display = "none";
+        this.btnSnapshot.onclick = () => {
+            if (confirm("Save current periodicity settings as a snapshot?")) {
+                this.loadingOverlay.classList.remove('fade-out');
+                this.api.saveSnapshot()
+                    .then(() => alert("Snapshot Saved to 'PeriodicityHistory' sheet!"))
+                    .finally(() => this.loadingOverlay.classList.add('fade-out'));
+            }
+        };
+        if (addBtn && addBtn.parentNode) {
+            addBtn.parentNode.insertBefore(this.btnSnapshot, addBtn.nextSibling);
+        }
+
         toggle.addEventListener('change', (e) => {
             this.isEditorMode = e.target.checked;
+            if (this.btnSnapshot) this.btnSnapshot.style.display = this.isEditorMode ? 'inline-block' : 'none';
             this.render();
         });
 
@@ -163,13 +195,14 @@ class HabitTracker {
         // rawData[0] is headers
         // rawData[1+] are habits
 
-        // Extract Dates (skip first col which is null/habit header placeholder)
-        this.state.dates = rawData[0].slice(1);
+        // Extract Dates (skip first two cols: null/habit header + Periodicity)
+        this.state.dates = rawData[0].slice(2);
 
         this.state.data = rawData.slice(1).map(row => {
             return {
                 name: row[0],
-                cells: row.slice(1) // Array of {val, note} objects
+                periodicity: row[1] || "", // Capture Periodicity
+                cells: row.slice(2) // Array of {val, note} objects
             };
         });
 
@@ -178,6 +211,17 @@ class HabitTracker {
 
     render() {
         this.gridContainer.innerHTML = '';
+
+        // 1. Create Table Structure
+        const table = document.createElement('table');
+        table.className = 'habit-grid';
+        this.gridContainer.appendChild(table);
+
+        const thead = document.createElement('thead');
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        table.appendChild(tbody);
 
         // VIEWPORT LOGIC: Render window around today or selection
         const now = new Date();
@@ -204,122 +248,161 @@ class HabitTracker {
         // Subset
         const renderDates = this.state.dates.slice(startIdx, endIdx);
 
-        // --- 1. Calculate Month Spans ---
+        // --- Calculate Month Spans ---
         const monthSpans = [];
         let currentMonth = null;
         let currentSpan = 0;
 
-        renderDates.forEach((dateStr, index) => {
+        renderDates.forEach((dateStr) => {
             const [y, m, d] = dateStr.split('-').map(Number);
             const dObj = new Date(y, m - 1, d);
             const mStr = dObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
             if (mStr !== currentMonth) {
-                if (currentMonth) {
-                    monthSpans.push({ name: currentMonth, span: currentSpan });
-                }
+                if (currentMonth) monthSpans.push({ name: currentMonth, span: currentSpan });
                 currentMonth = mStr;
                 currentSpan = 1;
             } else {
                 currentSpan++;
             }
         });
-        if (currentMonth) {
-            monthSpans.push({ name: currentMonth, span: currentSpan });
-        }
+        if (currentMonth) monthSpans.push({ name: currentMonth, span: currentSpan });
 
-        // --- 2. Setup CSS Grid Template ---
-        // Template: [Habit 120px] [Prev 30px] [Dates...] [Next 30px]
-        const colTemplate = `120px 30px repeat(${renderDates.length}, 44px) 30px`;
-        this.gridContainer.style.gridTemplateColumns = colTemplate;
-        this.gridContainer.style.gap = "0px";
-
-        // --- 3. Render Header Rows ---
+        // --- 2. Render Header Rows (THEAD) ---
 
         // Row 1: Month Header
-        const cornerMonth = document.createElement('div');
-        cornerMonth.className = 'header-corner-month';
-        this.gridContainer.appendChild(cornerMonth);
+        const trMonth = document.createElement('tr');
+        trMonth.className = 'header-month-row';
+        thead.appendChild(trMonth);
 
-        // 1.2 Prev Spacer (Upper Layout)
-        const prevSpacerM = document.createElement('div');
-        this.gridContainer.appendChild(prevSpacerM);
+        // 1.1 Header Left Corner (Span varies by mode)
+        const cornerMonth = document.createElement('th');
+        cornerMonth.className = 'header-corner header-corner-month';
+        // Span = 1 (Habit) + (Editor ? 1 Period : 0) + 1 (PrevArrow which is in Row 2 but visually aligned? No, Month corner covers everything above dates)
+        // Actually, Row 2 has: CornerDate (Habit), [Period?], PrevArrow.
+        // So Month Corner should span all of them to look clean.
+        // Default: Habit(1) + PrevArrow(1) = 2.
+        // Editor: Habit(1) + Period(1) + PrevArrow(1) = 3.
+        cornerMonth.colSpan = this.isEditorMode ? 3 : 2;
+        trMonth.appendChild(cornerMonth);
 
-        // 1.3 Month Cells
+        // 1.2 Month Cells
         monthSpans.forEach(span => {
-            const mDiv = document.createElement('div');
-            mDiv.className = 'cell header-month';
-            mDiv.textContent = span.name;
-            mDiv.style.gridColumn = `span ${span.span}`;
-            this.gridContainer.appendChild(mDiv);
+            const th = document.createElement('th');
+            th.textContent = span.name;
+            th.colSpan = span.span;
+            trMonth.appendChild(th);
         });
 
-        // 1.4 Next Spacer
-        const nextSpacerM = document.createElement('div');
-        this.gridContainer.appendChild(nextSpacerM);
+        // 1.3 End Spacer (Next Button)
+        const endMonth = document.createElement('th');
+        trMonth.appendChild(endMonth); // Spacer
 
         // Row 2: Date Header
-        const cornerDate = document.createElement('div');
-        cornerDate.className = 'header-corner-date';
-        cornerDate.textContent = 'Habits';
-        this.gridContainer.appendChild(cornerDate);
+        const trDate = document.createElement('tr');
+        trDate.className = 'header-date-row';
+        thead.appendChild(trDate);
 
-        // 2.2 Prev Spacer
-        const prevSpacerD = document.createElement('div');
-        this.gridContainer.appendChild(prevSpacerD);
+        // 2.1 Header Left Corner 
+        const cornerDate = document.createElement('th');
+        cornerDate.className = 'header-corner header-corner-date';
+        // Inner Div for Unified styling
+        const cornerInner = document.createElement('div');
+        cornerInner.className = 'header-corner-inner';
+        cornerInner.textContent = 'Habits';
+        cornerDate.appendChild(cornerInner);
+        cornerDate.colSpan = 1;
+        trDate.appendChild(cornerDate);
+
+        // 2.1b Periodicity Header (Editor Mode Only)
+        if (this.isEditorMode) {
+            const periodTh = document.createElement('th');
+            periodTh.className = 'header-corner header-corner-date period-col'; // Reuse corner style for sticky + period-col for width
+            periodTh.style.left = '160px'; // Sticky offset (Habit Col Width)
+
+            const periodInner = document.createElement('div');
+            periodInner.className = 'header-corner-inner';
+            periodInner.textContent = 'Freq';
+            periodTh.appendChild(periodInner);
+
+            trDate.appendChild(periodTh);
+        }
+
+        // 2.2 Prev Column Header (Spacer)
+        const prevTh = document.createElement('th');
+        prevTh.className = 'arrow-col'; // Added arrow-col
+        prevTh.style.width = '30px';
+        prevTh.style.zIndex = '45';
+        trDate.appendChild(prevTh);
 
         // 2.3 Date Cells
         renderDates.forEach(dateStr => {
-            const dateDiv = document.createElement('div');
-            dateDiv.className = 'cell header-date';
-
+            const th = document.createElement('th');
             const [y, m, d] = dateStr.split('-').map(Number);
             const dObj = new Date(y, m - 1, d);
-            const dayName = dObj.toLocaleDateString('en-US', { weekday: 'short' });
+
+            // Custom Condensed Day Names
+            const dayMap = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'];
+            const dayName = dayMap[dObj.getDay()];
             const dayNum = dObj.getDate();
 
-            dateDiv.innerHTML = `<span style="font-size:0.8em">${dayName}</span><span style="font-size:1.1em; font-weight:bold">${dayNum}</span>`;
+            // Removed month-end-border logic
+
+            // Use inner div for flex/stacking if needed, or simple HTML
+            th.innerHTML = `<div class="header-date-cell"><span style="font-size:0.8em">${dayName}</span><span style="font-size:1.1em; font-weight:bold">${dayNum}</span></div>`;
 
             if (dateStr === todayStr) {
-                dateDiv.classList.add('today-col');
-                dateDiv.id = 'header-today';
+                th.classList.add('today-col');
+                th.id = 'header-today';
             }
-
-            this.gridContainer.appendChild(dateDiv);
+            trDate.appendChild(th);
         });
 
-        // 2.4 Next Spacer
-        const nextSpacerD = document.createElement('div');
-        this.gridContainer.appendChild(nextSpacerD);
+        // 2.4 Next Column Header
+        const nextTh = document.createElement('th');
+        nextTh.className = 'arrow-col'; // Added arrow-col
+        nextTh.style.width = '30px';
+        trDate.appendChild(nextTh);
 
-        // --- 4. Render Data Rows ---
+        // --- 3. Render Data Rows (TBODY) ---
         this.state.data.forEach((habit, rowIndex) => {
-            const rowHeader = document.createElement('div');
-            rowHeader.className = 'cell header-col';
-            rowHeader.textContent = habit.name;
+            const tr = document.createElement('tr');
+            tr.dataset.row = rowIndex; // For DnD
+            tbody.appendChild(tr);
 
-            // Editor Mode Logic
+            // 3.1 Habit Name (Sticky Left TH/TD)
+            const thName = document.createElement('th');
+            thName.className = 'header-col sticky-col';
+            // Inner Div for Card/Split styling
+            const innerDiv = document.createElement('div');
+            innerDiv.className = 'habit-name-inner';
+            innerDiv.textContent = habit.name;
+            thName.appendChild(innerDiv);
+
+            // Editor Mode: DnD on the ROW
             if (this.isEditorMode) {
-                rowHeader.classList.add('draggable');
-                rowHeader.draggable = true;
-                rowHeader.addEventListener('dragstart', (e) => this.handleDragStart(e, rowIndex));
-                rowHeader.addEventListener('dragenter', (e) => e.preventDefault());
-                rowHeader.addEventListener('dragover', (e) => this.handleDragOver(e, rowIndex, rowHeader));
-                rowHeader.addEventListener('dragleave', (e) => this.handleDragLeave(e, rowHeader));
-                rowHeader.addEventListener('drop', (e) => this.handleDrop(e, rowIndex));
+                tr.draggable = true;
+                tr.classList.add('draggable');
+                tr.addEventListener('dragstart', (e) => this.handleDragStart(e, rowIndex));
+                tr.addEventListener('dragenter', (e) => e.preventDefault());
+                tr.addEventListener('dragover', (e) => this.handleDragOver(e, rowIndex, tr));
+                tr.addEventListener('dragleave', (e) => this.handleDragLeave(e, tr));
+                tr.addEventListener('drop', (e) => this.handleDrop(e, rowIndex));
             }
 
-            rowHeader.addEventListener('dblclick', () => {
+            // Editor Mode: Rename/Delete
+            thName.addEventListener('dblclick', () => {
                 if (!this.isEditorMode) return;
                 const newName = prompt("Rename habit:", habit.name);
                 if (newName) {
                     habit.name = newName;
-                    rowHeader.textContent = newName;
+                    const inner = thName.querySelector('.habit-name-inner');
+                    if (inner) inner.textContent = newName;
                     this.api.renameHabit(rowIndex, newName);
                 }
             });
 
-            rowHeader.addEventListener('contextmenu', (e) => {
+            thName.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 if (!this.isEditorMode) return;
                 if (confirm(`Delete habit "${habit.name}"?`)) {
@@ -327,47 +410,81 @@ class HabitTracker {
                 }
             });
 
-            this.gridContainer.appendChild(rowHeader);
+            tr.appendChild(thName);
 
-            // Prev Button
-            const prevCell = document.createElement('div');
-            prevCell.className = 'load-more-container'; // Generic class
-            prevCell.innerHTML = '<span class="load-more-arrow">‹</span>';
-            prevCell.title = "Load previous days";
-            prevCell.addEventListener('click', () => this.loadMorePast());
-            this.gridContainer.appendChild(prevCell);
+            // 3.1b Periodicity Cell (Editor Mode Only)
+            if (this.isEditorMode) {
+                const tdPeriod = document.createElement('td');
+                tdPeriod.className = 'period-col sticky-col';
+                tdPeriod.style.left = '160px'; // Sticky offset
+                tdPeriod.style.zIndex = '60'; // Same as habit name
 
-            // Data Cells (Filtered Window)
-            const renderCells = habit.cells.slice(startIdx, endIdx);
+                const periodDiv = document.createElement('div');
+                periodDiv.className = 'period-col-inner';
+                periodDiv.textContent = habit.periodicity || "-";
 
-            renderCells.forEach((cellData, viewIndex) => {
-                const originalColIndex = startIdx + viewIndex;
-                const cell = document.createElement('div');
-                cell.className = `cell status-${cellData.val}`;
-                cell.dataset.row = rowIndex;
-                cell.dataset.col = originalColIndex;
-
-                if (cellData.note) {
-                    cell.classList.add('has-note');
-                    cell.title = cellData.note;
-                }
-
-                cell.addEventListener('click', () => this.handleCellClick(cell, habit, originalColIndex));
-                cell.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    this.handleCellContextMenu(cell, habit, originalColIndex);
+                // Edit Logic
+                periodDiv.addEventListener('click', () => {
+                    const newP = prompt("Set Periodicity (e.g. 1/d, 3/w, 2/m):", habit.periodicity);
+                    if (newP !== null) {
+                        habit.periodicity = newP;
+                        periodDiv.textContent = newP || "-";
+                        this.api.updateHabitPeriodicity(rowIndex, newP).then(() => {
+                            // reload to process states, now that backend recalc is rigorous
+                            this.loadData();
+                            console.log("Periodicity updated & Data reloaded");
+                        });
+                    }
                 });
 
-                this.gridContainer.appendChild(cell);
+                tdPeriod.appendChild(periodDiv);
+                tr.appendChild(tdPeriod);
+            }
+
+            // 3.2 Prev Button (TD)
+            const tdPrev = document.createElement('td');
+            tdPrev.className = 'arrow-col'; // Sticky + Arrow Col
+
+            const btnPrev = document.createElement('div');
+            btnPrev.className = 'load-more-container';
+            btnPrev.innerHTML = '<span class="load-more-arrow">‹</span>';
+            btnPrev.addEventListener('click', () => this.loadMorePast());
+            tdPrev.appendChild(btnPrev);
+            tr.appendChild(tdPrev);
+
+            // 3.3 Data Cells
+            const renderCells = habit.cells.slice(startIdx, endIdx);
+            renderCells.forEach((cellData, viewIndex) => {
+                const originalColIndex = startIdx + viewIndex;
+                const td = document.createElement('td');
+
+                const cellDiv = document.createElement('div');
+                cellDiv.className = `cell status-${cellData.val}`;
+
+                if (cellData.note) {
+                    cellDiv.classList.add('has-note');
+                    cellDiv.title = cellData.note;
+                }
+
+                cellDiv.addEventListener('click', () => this.handleCellClick(cellDiv, habit, originalColIndex));
+                cellDiv.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    this.handleCellContextMenu(cellDiv, habit, originalColIndex);
+                });
+
+                td.appendChild(cellDiv);
+                tr.appendChild(td);
             });
 
-            // Next Button
-            const nextCell = document.createElement('div');
-            nextCell.className = 'load-more-container';
-            nextCell.innerHTML = '<span class="load-more-arrow">›</span>';
-            nextCell.title = "Load more days";
-            nextCell.addEventListener('click', () => this.loadMoreFuture());
-            this.gridContainer.appendChild(nextCell);
+            // 3.4 Next Button
+            const tdNext = document.createElement('td');
+            tdNext.className = 'arrow-col'; // Arrow Col
+            const btnNext = document.createElement('div');
+            btnNext.className = 'load-more-container';
+            btnNext.innerHTML = '<span class="load-more-arrow">›</span>';
+            btnNext.addEventListener('click', () => this.loadMoreFuture());
+            tdNext.appendChild(btnNext);
+            tr.appendChild(tdNext);
         });
     }
 
@@ -402,17 +519,18 @@ class HabitTracker {
             if (isPast) return;
         }
 
-        // Cycle: 0 -> 1 -> 2 -> 0
-        // If Editor Mode, we might want to allow cycling OUT of Failed (-1)?
-        // For now, let's allow resetting Failed to Neutral in Editor.
-
+        // Cycle Logic
         let nextVal = 0;
 
-        if (this.isEditorMode && cellData.val === -1) {
-            nextVal = 0; // Reset failed to neutral
+        if (this.isEditorMode) {
+            // Editor Mode: 0 -> 1 -> 2 -> -1 -> 0
+            if (cellData.val === 0) nextVal = 1;
+            else if (cellData.val === 1) nextVal = 2;
+            else if (cellData.val === 2) nextVal = -1;
+            else if (cellData.val === -1) nextVal = 0;
         } else {
-            // Normal Cycle
-            if (cellData.val === -1) return; // Should not happen if Default Mode checked above
+            // Normal Mode: 0 -> 1 -> 2 -> 0 (Cannot set to -1 manually, only auto-fail)
+            if (cellData.val === -1) return;
             if (cellData.val === 0) nextVal = 1;
             else if (cellData.val === 1) nextVal = 2;
             else if (cellData.val === 2) nextVal = 0;
@@ -422,7 +540,6 @@ class HabitTracker {
         cellData.val = nextVal;
 
         // Update DOM classes
-        // Use regex or list to clean old status classes just in case
         cellElement.className = `cell status-${nextVal}`;
         if (cellData.note) cellElement.classList.add('has-note'); // restore note class
 

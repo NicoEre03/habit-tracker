@@ -10,8 +10,7 @@ function handleRequest(e) {
   const lock = LockService.getScriptLock();
   lock.tryLock(10000);
 
-  const lock = LockService.getScriptLock();
-  lock.tryLock(10000);
+
 
   try {
     // robustly get first sheet
@@ -29,10 +28,13 @@ function handleRequest(e) {
     let result = {};
 
     if (action === "read") {
+      processHabitStates(sheet); // Calc logic before read
       result = getSheetData(sheet);
     } 
     else if (action === "update") {
       const resultMsg = updateCell(sheet, payload);
+      SpreadsheetApp.flush(); // Enforce write
+      processHabitStates(sheet); 
       result = { status: resultMsg === "OK" ? "success" : "error", message: resultMsg };
     }
     else if (action === "addHabit") {
@@ -51,6 +53,16 @@ function handleRequest(e) {
       reorderHabit(sheet, payload.fromIndex, payload.toIndex);
       result = { status: "success" };
     }
+    else if (action === "updateHabitPeriodicity") {
+      updateHabitPeriodicity(sheet, payload.rowIndex, payload.periodicity);
+      SpreadsheetApp.flush(); // Enforce write
+      processHabitStates(sheet); 
+      result = { status: "success" };
+    }
+    else if (action === "saveSnapshot") {
+      savePeriodicitySnapshot(sheet);
+      result = { status: "success" };
+    }
     
     return ContentService.createTextOutput(JSON.stringify(result))
       .setMimeType(ContentService.MimeType.JSON);
@@ -62,6 +74,294 @@ function handleRequest(e) {
     lock.releaseLock();
   }
 }
+
+function processHabitStates(sheet) {
+  // 1. Get All Data
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 3) return; 
+
+  const headers = sheet.getRange(1, 3, 1, lastCol - 2).getValues()[0]; 
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  const data = dataRange.getValues(); 
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Helper to parse date from header
+  const parsedDates = headers.map(h => {
+    if (h instanceof Date) return h;
+    const d = new Date(h);
+    return isNaN(d.getTime()) ? null : d;
+  });
+
+  // --- HISTORY LOOKUP SYSTEM ---
+  let historyMap = null; // Map<HabitName, Array<{date: Date, freq: String}>>
+  const ss = sheet.getParent();
+  const hSheet = ss.getSheetByName("PeriodicityHistory");
+  
+  if (hSheet) {
+      historyMap = {};
+      const hLastRow = hSheet.getLastRow();
+      const hLastCol = hSheet.getLastColumn();
+      if (hLastRow > 1 && hLastCol > 1) {
+          const hData = hSheet.getRange(1, 1, hLastRow, hLastCol).getValues();
+          const hHeaders = hData[0];
+          
+          // Parse Header Dates
+          const snapDates = [];
+          for (let c = 1; c < hHeaders.length; c++) {
+              let d = hHeaders[c];
+              if (!(d instanceof Date)) d = new Date(d);
+              if (!isNaN(d)) snapDates.push({ date: d, colIdx: c });
+          }
+          // Sort snapshots by date just in case
+          snapDates.sort((a,b) => a.date - b.date);
+
+          // Build Map
+          for (let r = 1; r < hData.length; r++) {
+              const hName = hData[r][0];
+              const historyList = [];
+              snapDates.forEach(snap => {
+                  const val = hData[r][snap.colIdx];
+                  historyList.push({ date: snap.date, freq: String(val || "").trim().toLowerCase() });
+              });
+              historyMap[hName] = historyList;
+          }
+      }
+  }
+
+  // 2. Iterate Habits
+  for (let r = 0; r < data.length; r++) {
+    const row = data[r];
+    const name = row[0];
+    const livePeriodicity = String(row[1] || "1/d").trim().toLowerCase(); 
+
+    // Define function to get target for a specific date
+    // Creates a closure over the history data for this habit
+    const getTargetForDate = (dateObj) => {
+        let pStr = livePeriodicity;
+        
+        if (historyMap && historyMap[name] && historyMap[name].length > 0) {
+            const list = historyMap[name];
+            // Find latest snapshot <= dateObj
+            // Logic: "Effective Date". 
+            // If dateObj is BEFORE the first snapshot, usage depends on user intent.
+            // PROPOSAL: Use the OLDEST snapshot as the default for all past time.
+            // If we fall back to "Live", then "Live" edits change history, which defeats the purpose.
+            
+            // 1. Find matched snapshot
+            let bestSnap = null;
+            for (let i = 0; i < list.length; i++) {
+                if (list[i].date <= dateObj) {
+                    bestSnap = list[i];
+                } else {
+                    break; // Sorted ascending, so once we pass dateObj, we stop
+                }
+            }
+            
+            // 2. Fallback if dateObj is older than all snapshots
+            if (!bestSnap) {
+                 bestSnap = list[0]; // Use the oldest as "Origin"
+            }
+            
+            pStr = bestSnap.freq;
+        }
+
+        if (!pStr) return null; // Empty in history -> Habit didn't exist -> No Calc
+
+        const match = pStr.match(/(\d+)\/([dwm])/);
+        if (match) {
+            return { target: parseInt(match[1], 10), type: match[2] };
+        }
+        return { target: 1, type: 'd' }; // Default? Or null? '1/d' default seems safe.
+    };
+
+    // We can't simply group by 'd/w/m' for the whole row anymore because type might CHANGE.
+    // e.g. Jan=Daily, Feb=Weekly.
+    // Complex! processPeriodHabit assumes a single type for the row.
+    
+    // NEW STRATEGY: 
+    // We must segment the row by Period Type first? 
+    // Or just iterate periods and check type for each?
+    // Dates are columns. 
+    // The "Periods" (Weeks/Months) are buckets of columns.
+    // If on Jan 31 (Week 5) the rule is "Weekly", we treat that week as Weekly.
+    // If on Jan 31 the rule is "Daily", we treat that day as Daily.
+    
+    // To solve this efficiently:
+    // 1. Group columns into "Calculation Units" (Days)
+    // 2. For each Day, determine the Rule.
+    // 3. If Rule is Daily -> Process immediately.
+    // 4. If Rule is Weekly -> Add to "Current Week Bucket". If bucket finishes or Rule changes type -> Process Bucket.
+    
+    // Actually, "Rule changes type mid-week" is messy. 
+    // Simplification: The rule effectively at the END of the period governs the period.
+    // e.g. If on Sunday (end of week) the rule is "3/w", the whole week is judged by "3/w".
+    
+    // Let's iterate all dates and group them into potential buckets.
+    
+    // Bucket Types: D, W, M
+    const bucket = { type: null, key: null, days: [] };
+    
+    // Helper to process a bucket
+    const flushBucket = () => {
+        if (!bucket.days.length) return;
+        
+        if (bucket.type === 'd') {
+            // Process individual days
+             processDailyHabitSimple(sheet, r + 2, bucket.days, today);
+        } else if (bucket.type) {
+            // W or M
+            const target = bucket.target; // Saved from the trigger moment
+            processPeriodHabitSimple(sheet, r + 2, bucket.days, target, today, bucket.type);
+        }
+        // Reset
+        bucket.type = null;
+        bucket.key = null;
+        bucket.days = [];
+    };
+
+    for (let c = 2; c < row.length; c++) {
+        const date = parsedDates[c - 2];
+        if (!date) continue;
+        
+        // Lookup Rule for this date
+        const rule = getTargetForDate(date);
+        
+        if (!rule) {
+            // No rule (empty history) -> skip calc (do not flush pending? maybe flush pending).
+            // If I had a week pending and now I have no rule, that week is "over".
+            flushBucket();
+            continue; 
+        }
+
+        // Determine Key for this rule type
+        let key = "";
+        if (rule.type === 'd') key = date.getTime(); // Unique per day
+        else if (rule.type === 'w') key = getWeekKey(date);
+        else if (rule.type === 'm') key = getMonthKey(date);
+        
+        // Check consistency with current bucket
+        if (bucket.key !== key || bucket.type !== rule.type) {
+            // Context switch! Flush old calc.
+            flushBucket();
+            
+            // Start new
+            bucket.type = rule.type;
+            bucket.key = key;
+            bucket.target = rule.target; // Use target from the start of the bucket? Or end?
+            // "End of period" logic implies we keep updating target? 
+            // Let's use the target associated with the 'current' date being added,
+            // effectively determining the rule by the "chunks" defined by change.
+            // If I change Mon(1/w) to Tue(2/w).
+            // Mon was in "Week X". Tue is in "Week X".
+            // Key is same. Type is same.
+            // Target changed.
+            // Do we flush?
+            // If we flush, we judge Mon by 1/w (1 day, 0 done). Fail? No, weekly needs 7 days.
+            // So we MUST NOT flush if only target changes within same period key.
+            // We should implicitly adopt the latest target for the period?
+            // Yes. "End of week rule applies".
+            bucket.target = rule.target; 
+        } else {
+             // Same bucket, just update target to latest (End of Period Logic)
+             bucket.target = rule.target;
+        }
+        
+        bucket.days.push({
+            colIdx: c + 1,
+            val: row[c],
+            date: date
+        });
+    }
+    // Flush end
+    flushBucket();
+  }
+}
+
+// --- SIMPLIFIED PROCESSORS ---
+// Adapted from original processDaily/PeriodHabit but taking pre-built 'days' array
+
+function processDailyHabitSimple(sheet, rowIdx, days, today) {
+    days.forEach(d => {
+        if (d.date < today) {
+             if (d.val === "" || d.val === 0 || d.val === -2) {
+                 sheet.getRange(rowIdx, d.colIdx).setValue(-1);
+             }
+        }
+    });
+}
+
+function processPeriodHabitSimple(sheet, rowIdx, days, target, today, type) {
+    const doneCount = days.filter(d => d.val == 1 || d.val == 2).length; 
+    const lastDateInPeriod = days[days.length - 1].date;
+    const isPeriodEnded = isPeriodStrictlyPast(lastDateInPeriod, today, type);
+
+    if (isPeriodEnded) {
+      let failedNeeded = Math.max(0, target - doneCount);
+      const nonDone = days.filter(d => d.val !== 1 && d.val !== 2);
+      
+      nonDone.sort((a, b) => {
+        const getScore = (v) => {
+             if (v === -1) return 0;
+             if (v === 0 || v === "") return 1;
+             return 2;
+        };
+        return getScore(a.val) - getScore(b.val) || (Math.random() - 0.5);
+      });
+      
+      for (let i = 0; i < nonDone.length; i++) {
+        const item = nonDone[i];
+        let newVal = (i < failedNeeded) ? -1 : -2;
+        const currentVal = (item.val === "") ? 0 : item.val;
+        if (currentVal !== newVal) {
+             sheet.getRange(rowIdx, item.colIdx).setValue(newVal);
+        }
+      }
+    } else {
+      // Period Ongoing
+      const futureOrTodayDays = days.filter(d => d.date >= today).length;
+      if ((doneCount + futureOrTodayDays) >= target) {
+         const passedNeutral = days.filter(d => d.date < today && (d.val === "" || d.val === 0));
+         passedNeutral.forEach(d => {
+            sheet.getRange(rowIdx, d.colIdx).setValue(-2);
+         });
+      }
+    }
+}
+
+// --- END PROCESSORS ---
+
+function getWeekKey(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+  const weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
+  return d.getUTCFullYear() + "-W" + String(weekNo).padStart(2, '0');
+}
+
+function getMonthKey(date) {
+  return date.getFullYear() + "-" + (date.getMonth() + 1);
+}
+
+function isPeriodStrictlyPast(dateInPeriod, today, type) {
+    if (type === 'w') {
+        const currentWeek = getWeekKey(today);
+        const periodWeek = getWeekKey(dateInPeriod);
+        return periodWeek < currentWeek; // String comparison works for YYYY-Www
+    } else {
+        const currentMonth = getMonthKey(today); // "2026-2"
+        const periodMonth = getMonthKey(dateInPeriod);
+        // Compare carefully. "2025-12" < "2026-1"
+        // Convert to value
+        const [y1, m1] = currentMonth.split('-').map(Number);
+        const [y2, m2] = periodMonth.split('-').map(Number);
+        return (y2 < y1) || (y2 === y1 && m2 < m1);
+    }
+}
+
 
 function getSheetData(sheet) {
   const lastRow = sheet.getLastRow();
@@ -80,10 +380,10 @@ function getSheetData(sheet) {
   
   // 1. Process Header
   const headerRowFromSheet = values[0];
-  const gridHeader = [null]; // First col is habit names
+  const gridHeader = [null, null]; // [HabitName, Periodicity] - Matches Grid Output
   
-  // Format Dates ensuring consistency
-  for (let c = 1; c < headerRowFromSheet.length; c++) {
+  // Format Dates ensuring consistency. Header now starts at Col 3 (Index 2)
+  for (let c = 2; c < headerRowFromSheet.length; c++) {
     const rawDate = headerRowFromSheet[c];
     if (rawDate instanceof Date) {
       // YYYY-MM-DD
@@ -101,10 +401,12 @@ function getSheetData(sheet) {
     const rowVals = values[r];
     const rowNotes = notes[r];
     const habitName = rowVals[0];
+    const periodicity = rowVals[1]; // New Col
     
-    const habitRow = [habitName];
+    // Output row: [Name, Period, Val1, Val2...]
+    const habitRow = [habitName, periodicity];
     
-    for (let c = 1; c < rowVals.length; c++) {
+    for (let c = 2; c < rowVals.length; c++) {
       let val = rowVals[c];
       
       // Strict Normalization of Status
@@ -134,10 +436,11 @@ function updateCell(sheet, data) {
   if (hRow > 0 && dCol > 0) {
     const cell = sheet.getRange(hRow, dCol);
     if (typeof data.val !== 'undefined') cell.setValue(data.val);
-    if (typeof data.note !== 'undefined') cell.setNote(data.note || ""); // Native Note
+    if (typeof data.note !== 'undefined') cell.setNote(data.note || ""); 
     return "OK";
   } else {
-    return `Lookup Failed: Row=${hRow} (Habit: ${data.habitName}), Col=${dCol} (Date: ${data.dateStr})`;
+    // Debug info
+    return `Lookup Failed: Row=${hRow} (Name: ${data.habitName}), Col=${dCol} (Date: ${data.dateStr})`;
   }
 }
 
@@ -188,6 +491,76 @@ function reorderHabit(sheet, fromIndex, toIndex) {
   sheet.moveRows(range, dest);
 }
 
+function updateHabitPeriodicity(sheet, rowIndex, newPeriod) {
+   // rowIndex is 0-based index of habits (Grid rows).
+   // Sheet Row = rowIndex + 2.
+   // Periodicity is Column 2.
+   sheet.getRange(rowIndex + 2, 2).setValue(newPeriod);
+}
+
+function savePeriodicitySnapshot(sheet) {
+  const ss = sheet.getParent();
+  let historySheet = ss.getSheetByName("PeriodicityHistory");
+  if (!historySheet) {
+    historySheet = ss.insertSheet("PeriodicityHistory");
+    historySheet.appendRow(["Habit Name"]); // Init Header
+  }
+  
+  // 1. Setup Date Column
+  const todayStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  const hLastCol = Math.max(1, historySheet.getLastColumn());
+  const headers = historySheet.getRange(1, 1, 1, hLastCol).getValues()[0];
+  
+  let dateColIdx = -1; // 1-based
+  for (let i = 1; i < headers.length; i++) { // Skip Col 1 (Name)
+     let hStr = "";
+     if (headers[i] instanceof Date) {
+        hStr = Utilities.formatDate(headers[i], Session.getScriptTimeZone(), "yyyy-MM-dd");
+     } else {
+        hStr = String(headers[i]);
+     }
+     if (hStr === todayStr) {
+         dateColIdx = i + 1;
+         break;
+     }
+  }
+  
+  if (dateColIdx === -1) {
+      dateColIdx = hLastCol + 1;
+      historySheet.getRange(1, dateColIdx).setValue(todayStr);
+  }
+  
+  // 2. Sync Habits & Write Values
+  // Get Live Data
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const liveData = sheet.getRange(2, 1, lastRow - 1, 2).getValues(); // [Name, Period]
+  
+  // Get History Rows
+  const hLastRow = Math.max(1, historySheet.getLastRow());
+  const hData = historySheet.getRange(1, 1, hLastRow, 1).getValues(); // Names only
+  
+  const historyMap = {}; // Name -> RowIndex (1-based)
+  for (let i = 1; i < hData.length; i++) {
+      historyMap[hData[i][0]] = i + 1;
+  }
+  
+  // Write
+  for (let i = 0; i < liveData.length; i++) {
+      const name = liveData[i][0];
+      const period = liveData[i][1] || "1/d"; // Default if empty?
+      
+      let hRow = historyMap[name];
+      if (!hRow) {
+          historySheet.appendRow([name]);
+          hRow = historySheet.getLastRow();
+          historyMap[name] = hRow;
+      }
+      
+      historySheet.getRange(hRow, dateColIdx).setValue(period);
+  }
+}
+
 // Helpers
 function findRowByName(sheet, name) {
   // Fetch only the first column
@@ -200,11 +573,12 @@ function findRowByName(sheet, name) {
 
 function findColByDate(sheet, dateStr) {
   // Robust Date Matching
-  // Header row is Row 1. B1 is 1st date (Col 2).
+  // Header row is Row 1. Dates start at Col 3 (Index C).
   const lastCol = sheet.getLastColumn();
-  if (lastCol < 2) return -1;
+  if (lastCol < 3) return -1;
   
-  const headers = sheet.getRange(1, 2, 1, lastCol - 1).getValues()[0];
+  // Get header dates from C1...
+  const headers = sheet.getRange(1, 3, 1, lastCol - 2).getValues()[0];
   
   for (let i = 0; i < headers.length; i++) {
     const h = headers[i];
@@ -224,7 +598,7 @@ function findColByDate(sheet, dateStr) {
     }
     
     // Strict match YYYY-MM-DD
-    if (hStr === dateStr) return i + 2; // Col index (1-based, +2 offset)
+    if (hStr === dateStr) return i + 3; // Col index (1-based, +3 offset because dates start at C)
   }
   return -1;
 }
