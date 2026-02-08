@@ -380,28 +380,88 @@ function getSheetData(sheet) {
   
   // 1. Process Header
   const headerRowFromSheet = values[0];
-  const gridHeader = [null, null]; // [HabitName, Periodicity] - Matches Grid Output
+  const gridHeader = [null, null]; 
   
   // Format Dates ensuring consistency. Header now starts at Col 3 (Index 2)
   for (let c = 2; c < headerRowFromSheet.length; c++) {
     const rawDate = headerRowFromSheet[c];
     if (rawDate instanceof Date) {
-      // YYYY-MM-DD
       const iso = Utilities.formatDate(rawDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
       gridHeader.push(iso);
     } else {
-      // If it's a string or empty, just push
       gridHeader.push(rawDate);
     }
   }
   grid.push(gridHeader);
   
+  // --- SYNC: Get Effective Periodicity for Today from History ---
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  let historyMap = {}; 
+  
+  const ss = sheet.getParent();
+  const hSheet = ss.getSheetByName("PeriodicityHistory");
+  if (hSheet) {
+      const hLastCol = hSheet.getLastColumn();
+      const hLastRow = hSheet.getLastRow();
+      if (hLastCol > 1 && hLastRow > 1) {
+          const hHeaders = hSheet.getRange(1, 1, 1, hLastCol).getValues()[0];
+          
+          // Find latest snapshot <= Today
+          let bestSnapIdx = -1; // 1-based col index relative to sheet? Header array is 0-based.
+          let bestSnapDate = new Date(0); // Epoch
+          
+          // Headers[1] starts the snapshots (Col 2)
+          for (let c = 1; c < hHeaders.length; c++) {
+             let d = hHeaders[c];
+             if (!(d instanceof Date)) d = new Date(d);
+             if (isNaN(d.getTime())) continue;
+             
+             if (d <= today && d >= bestSnapDate) {
+                 bestSnapDate = d;
+                 bestSnapIdx = c; // Index in hHeaders array. Sheet Col = c + 1
+             }
+          }
+          
+          // If found, load that column
+          // If NOT found (all snapshots are in future??), maybe use oldest? 
+          // Similar logic to processHabitStates: "Origin Rule".
+          if (bestSnapIdx === -1) {
+             // Fallback: Use the First Snapshot (Index 1) if it exists, as the "Origin"
+             if (hHeaders.length > 1) bestSnapIdx = 1;
+          }
+          
+          if (bestSnapIdx !== -1) {
+              const snapColIdx = bestSnapIdx + 1; // 1-based for getRange
+              const hData = hSheet.getRange(2, 1, hLastRow - 1, hLastCol).getValues(); // Get all data? 
+              // Optimization: Just get Name col and Snap col
+              // But getRange is contiguous. 
+              // Let's just Loop the already fetched 'hData' if we fetched it? 
+              // We didn't fetch full data yet.
+              // Fetch Name Col and Target Col.
+              const names = hSheet.getRange(2, 1, hLastRow - 1, 1).getValues();
+              const values = hSheet.getRange(2, snapColIdx, hLastRow - 1, 1).getValues();
+              
+              for (let i = 0; i < names.length; i++) {
+                  const n = names[i][0];
+                  const v = values[i][0];
+                  if (n) historyMap[n] = v;
+              }
+          }
+      }
+  }
+
   // 2. Process Habits
   for (let r = 1; r < values.length; r++) {
     const rowVals = values[r];
     const rowNotes = notes[r];
     const habitName = rowVals[0];
-    const periodicity = rowVals[1]; // New Col
+    
+    // SYNC LOGIC: Check map first, fallback to Live Column
+    let periodicity = historyMap[habitName];
+    if (periodicity === undefined || periodicity === "") {
+        periodicity = rowVals[1]; // Fallback to Live
+    }
     
     // Output row: [Name, Period, Val1, Val2...]
     const habitRow = [habitName, periodicity];
@@ -410,8 +470,6 @@ function getSheetData(sheet) {
       let val = rowVals[c];
       
       // Strict Normalization of Status
-      // Empty string = 0 (Neutral)
-      // Check for numbers. User wants -1, 0, 1, 2.
       if (val === "") val = 0;
       else val = Number(val);
       if (isNaN(val)) val = 0;
@@ -426,6 +484,7 @@ function getSheetData(sheet) {
   
   return grid;
 }
+    
 
 function updateCell(sheet, data) {
   // data: { habitName, dateStr, val, note }

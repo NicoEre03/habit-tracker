@@ -33,28 +33,82 @@
 }
 
 /* --- Cells --- */
+/* --- Cells --- */
 .cell {
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 12px;
     user-select: none;
-    background-color: var(--bg-color);
+    background-color: transparent;
+    /* Default transparent, tint handled by window class */
     width: var(--cell-width);
     height: var(--cell-height);
     cursor: pointer;
-    transition: background-color 0.1s ease, transform 0.1s;
+    transition: transform 0.1s;
     position: relative;
     border-radius: var(--border-radius);
-    /* Rounded Cells */
+    /* Default radius */
     margin: 0;
-    /* Handled by TD padding now */
 }
 
-.cell:hover {
-    border: 1px solid #777;
-    transform: scale(1.05);
+.cell:hover .status-indicator {
+    transform: scale(1.1);
     z-index: 5;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Status Indicator (The visual square) */
+.status-indicator {
+    /* NEW structure */
+    width: 30px;
+    height: 30px;
+    border-radius: 4px;
+    transition: background-color 0.1s ease, transform 0.1s;
+    /* Flex centered by parent .cell */
+}
+
+/* Periodicity Window Styles */
+/* Only visible in Editor Mode via .editor-mode class */
+
+/* The Anchor Cell (Start of the period) */
+.editor-mode .cell.period-anchor {
+    z-index: 20;
+    /* Lift above neighbors so overlay renders on top */
+    /* Note: If neighbors have z-index (e.g. hover), this might fight. 
+       .cell:hover has z-index: 5. 20 is safe. */
+}
+
+/* The Overlay Bar */
+/* The Overlay Bar */
+.editor-mode .cell.period-anchor::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    /* Width Calculation:
+       Each cell is 34px wide (content).
+       Each TD has 1px padding, creating a 2px visual gap between cell edges.
+       Pitch = 34px + 2px = 36px.
+       Width = (Count * 36px) - 2px (Remove last gap to align with right edge of last cell).
+    */
+    width: calc(var(--span) * 36px - 2px);
+
+    background-color: transparent;
+    /* Removed tint */
+    border: 1px solid rgba(255, 255, 255, 0.349);
+    /* Visible white border */
+
+    pointer-events: none;
+    /* Click-through */
+    border-radius: 4px;
+    /* Reduced radius as requested */
+    /* Fixed radius for the whole pill */
+    z-index: 10;
+    /* Above cell content */
+    box-sizing: border-box;
+    /* Ensure border is inside width */
 }
 
 /* Note Indicator */
@@ -356,7 +410,8 @@ th.sticky-row {
     /* Increased from 0.5rem for better spacing */
     display: flex;
     align-items: center;
-    height: 100%;
+    height: var(--cell-height);
+    /* Force match cell height */
     width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -378,42 +433,33 @@ td {
     height: 100%;
 }
 
-/* --- Status States --- */
+/* --- Status States (Applied to .status-indicator) --- */
 .status-0 {
     background-color: var(--status-0-bg);
 }
 
 .status-1 {
     background-color: var(--status-1-bg);
-    color: var(--status-1-fg);
 }
-
-
 
 .status-2 {
     background-color: var(--status-2-bg);
-    color: var(--status-2-fg);
 }
 
-
-
 .status--1 {
+    /* Failed */
     background-color: var(--status-3-bg);
-    color: var(--status-3-fg);
-    cursor: default;
-    /* Failed state shouldn't satisfy the click interaction naturally, but handled in JS */
 }
 
 .status--2 {
+    /* Missed/Skipped */
     background-color: var(--status-4-bg);
-    color: var(--status-4-fg);
-    cursor: default;
 }
 
 
 
 /* --- Utility --- */
-.today-col {
+.header-date-row th.today-col {
     background-color: #2a2a2a;
     /* Slightly lighter highlight for the header */
     border-bottom: 2px solid #fff;
@@ -675,4 +721,42 @@ button {
 .load-more-arrow {
     font-size: 1.5rem;
     color: var(--text-secondary);
+}
+
+/* Save Config Button */
+.save-btn {
+    position: fixed;
+    bottom: 20px;
+    /* Align with FAB */
+    left: 160px;
+    /* Aligned with Frequency Column (Header Col Width) */
+    width: 50px;
+    /* Match Periodicity Col Wait */
+    height: 40px;
+    /* Compact height */
+
+    background-color: var(--surface-color);
+    /* "Same color card" */
+    color: var(--text-primary);
+    border: none;
+    border-radius: var(--border-radius);
+
+    font-weight: normal;
+    /* "Regular" font */
+    font-size: 0.8rem;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    cursor: pointer;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    transition: transform 0.1s, background-color 0.2s;
+}
+
+.save-btn:hover {
+    background-color: #3a3a3a;
+    /* Slightly lighter */
+    transform: translateY(-2px);
 }

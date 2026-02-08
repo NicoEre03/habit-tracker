@@ -134,13 +134,12 @@ class HabitTracker {
         const toggle = document.getElementById('editor-mode-toggle');
 
         // Inject Snapshot Button
-        const addBtn = document.getElementById('add-habit-btn');
+        // Inject Snapshot Button (Save Button)
         this.btnSnapshot = document.createElement('button');
-        this.btnSnapshot.textContent = "Save Config";
-        this.btnSnapshot.className = "add-btn";
-        this.btnSnapshot.style.backgroundColor = "#4caf50";
-        this.btnSnapshot.style.marginLeft = "10px";
-        this.btnSnapshot.style.display = "none";
+        this.btnSnapshot.textContent = "Save";
+        this.btnSnapshot.className = "save-btn";
+        this.btnSnapshot.style.display = "none"; // Hidden by default
+
         this.btnSnapshot.onclick = () => {
             if (confirm("Save current periodicity settings as a snapshot?")) {
                 this.loadingOverlay.classList.remove('fade-out');
@@ -149,13 +148,13 @@ class HabitTracker {
                     .finally(() => this.loadingOverlay.classList.add('fade-out'));
             }
         };
-        if (addBtn && addBtn.parentNode) {
-            addBtn.parentNode.insertBefore(this.btnSnapshot, addBtn.nextSibling);
-        }
+
+        document.body.appendChild(this.btnSnapshot);
 
         toggle.addEventListener('change', (e) => {
             this.isEditorMode = e.target.checked;
-            if (this.btnSnapshot) this.btnSnapshot.style.display = this.isEditorMode ? 'inline-block' : 'none';
+            document.body.classList.toggle('editor-mode', this.isEditorMode); // Toggle class on body
+            if (this.btnSnapshot) this.btnSnapshot.style.display = this.isEditorMode ? 'block' : 'none';
             this.render();
         });
 
@@ -379,15 +378,18 @@ class HabitTracker {
             innerDiv.textContent = habit.name;
             thName.appendChild(innerDiv);
 
-            // Editor Mode: DnD on the ROW
+            // Editor Mode: DnD on the Habit Name (Handle)
             if (this.isEditorMode) {
-                tr.draggable = true;
-                tr.classList.add('draggable');
-                tr.addEventListener('dragstart', (e) => this.handleDragStart(e, rowIndex));
-                tr.addEventListener('dragenter', (e) => e.preventDefault());
-                tr.addEventListener('dragover', (e) => this.handleDragOver(e, rowIndex, tr));
-                tr.addEventListener('dragleave', (e) => this.handleDragLeave(e, tr));
-                tr.addEventListener('drop', (e) => this.handleDrop(e, rowIndex));
+                thName.draggable = true;
+                thName.classList.add('draggable');
+                thName.addEventListener('dragstart', (e) => this.handleDragStart(e, rowIndex));
+                thName.addEventListener('dragenter', (e) => e.preventDefault());
+                thName.addEventListener('dragover', (e) => this.handleDragOver(e, rowIndex, tr)); // visual on row? or th?
+                // dragging the Th, but want to reorder the Row.
+                // handleDragOver adds 'drag-over' class to target.
+                // We should add it to the TR.
+                thName.addEventListener('dragleave', (e) => this.handleDragLeave(e, tr));
+                thName.addEventListener('drop', (e) => this.handleDrop(e, rowIndex));
             }
 
             // Editor Mode: Rename/Delete
@@ -453,13 +455,125 @@ class HabitTracker {
             tr.appendChild(tdPrev);
 
             // 3.3 Data Cells
+            // 3.3 Data Cells
             const renderCells = habit.cells.slice(startIdx, endIdx);
+
+            // Keep track of current window state for THIS row
+            let currentWindowEndIndex = -1;
+
             renderCells.forEach((cellData, viewIndex) => {
                 const originalColIndex = startIdx + viewIndex;
+                const dateStr = this.state.dates[originalColIndex];
+
                 const td = document.createElement('td');
 
                 const cellDiv = document.createElement('div');
-                cellDiv.className = `cell status-${cellData.val}`;
+                cellDiv.className = 'cell';
+                cellDiv.dataset.row = rowIndex;
+                cellDiv.dataset.col = originalColIndex;
+
+                // Periodicity Window Logic (Merged Overlay)
+                if (habit.periodicity) {
+                    const [y, m, d] = dateStr.split('-').map(Number);
+                    const dObj = new Date(y, m - 1, d);
+                    const day = dObj.getDay(); // 0=Sun...6=Sat
+
+                    // Determine if this cell starts a new visual window or continues one
+                    // We only want to place an anchor if we aren't already covered by a previous anchor's span
+
+                    // Simple logic:
+                    // 1. Check if we need to start a window (e.g. viewIndex > currentWindowEndIndex)
+                    // 2. If yes, calculate how long it extends within the VISIBLE renderCells
+                    // 3. Set anchor and span
+
+                    if (viewIndex > currentWindowEndIndex) {
+                        let span = 0;
+
+                        // Calculate Span logic based on periodicity type
+                        if (habit.periodicity.includes('/w')) {
+                            // Weekly: Run until Sunday OR end of view
+                            // Current day is dObj
+
+                            // Find distance to next Sunday (0)
+                            // today is day. Sunday is 0. 
+                            // If today is 1 (Mon), days left = 7 (Mon..Sun). (1..0)
+                            // If today is 0 (Sun), days left = 1.
+
+                            // Let's iterate forward in renderCells to see how long this week lasts
+                            // Stop if we hit a Sunday or run out of cells
+
+                            let k = viewIndex;
+                            while (k < renderCells.length) {
+                                span++;
+                                const kDateStr = this.state.dates[startIdx + k];
+                                const kD = new Date(kDateStr);
+                                // JS Date parsing from YYYY-MM-DD string treats as UTC usually, 
+                                // but we instantiated with y, m-1, d above which is local.
+                                // Let's stick to simple day index if possible or ensuring consistency.
+                                // simpler: re-parse local
+                                const [ky, km, kd] = kDateStr.split('-').map(Number);
+                                const kObj = new Date(ky, km - 1, kd);
+
+                                if (kObj.getDay() === 0) break; // End of week (Sunday)
+                                k++;
+                            }
+                        } else if (habit.periodicity.includes('/m')) {
+                            // Monthly: Run until different month
+                            let k = viewIndex;
+                            const startMonth = m; // 'm' is from dateStr.split at top of loop
+
+                            while (k < renderCells.length) {
+                                span++;
+                                const kDateStr = this.state.dates[startIdx + k];
+                                const [ky, km, kd] = kDateStr.split('-').map(Number);
+
+                                // Check next cell (lookahead) to see if we should stop AFTER this one? 
+                                // No, loop runs for current cell 'k'. 
+                                // We want to include 'k' if it matches month.
+                                // If 'k' logic above incremented span, we good.
+                                // Wait, the loop condition needs to break if NEXT is bad? 
+                                // actually, simpler:
+                                // Is THIS cell valid? Yes. Span++.
+                                // Is NEXT cell valid?
+
+                                // Let's peek next to decide if we stop?
+                                // Or check current k. 
+                                // The loop enters with k=viewIndex. 
+                                // We already inc span. 
+                                // check k's month. If k's month != start, we shouldn't have entered? 
+                                // No, viewIndex is valid start.
+
+                                // Correct logic: 
+                                // 1. Inc span for current k.
+                                // 2. Check k+1. If k+1 is diff month, break.
+
+                                if (startIdx + k + 1 >= this.state.dates.length) break; // End of data
+                                if (k + 1 >= renderCells.length) break; // End of view
+
+                                const nextDateStr = this.state.dates[startIdx + k + 1];
+                                const [ny, nm, nd] = nextDateStr.split('-').map(Number);
+
+                                if (nm !== startMonth) break;
+
+                                k++;
+                            }
+                        } else if (habit.periodicity.includes('/d')) {
+                            span = 1;
+                        }
+
+                        // Apply Anchor if span > 0
+                        if (span > 0) {
+                            cellDiv.classList.add('period-anchor');
+                            cellDiv.style.setProperty('--span', span);
+                            currentWindowEndIndex = viewIndex + span - 1;
+                        }
+                    }
+                }
+
+                // Inner Status Indicator
+                const statusDiv = document.createElement('div');
+                statusDiv.className = `status-indicator status-${cellData.val}`;
+                cellDiv.appendChild(statusDiv);
 
                 if (cellData.note) {
                     cellDiv.classList.add('has-note');
@@ -539,9 +653,13 @@ class HabitTracker {
         // Optimistic UI Update
         cellData.val = nextVal;
 
-        // Update DOM classes
-        cellElement.className = `cell status-${nextVal}`;
-        if (cellData.note) cellElement.classList.add('has-note'); // restore note class
+        // Update DOM classes (Target inner indicator)
+        const statusInd = cellElement.querySelector('.status-indicator');
+        if (statusInd) {
+            statusInd.className = `status-indicator status-${nextVal}`;
+        }
+
+        if (cellData.note) cellElement.classList.add('has-note'); // restored note class on outer cell
 
         // Send to API
         this.api.updateCellData(habitObj.name, this.state.dates[colIndex], { val: nextVal });
@@ -568,9 +686,11 @@ class HabitTracker {
                         cellData.val = -1;
 
                         // Update DOM visibly
+                        // Update DOM visibly
                         const cell = this.gridContainer.querySelector(`.cell[data-row="${rowIndex}"][data-col="${colIndex}"]`);
                         if (cell) {
-                            cell.className = `cell status--1`;
+                            const statusInd = cell.querySelector('.status-indicator');
+                            if (statusInd) statusInd.className = `status-indicator status--1`;
                         }
 
                         // Queue update
